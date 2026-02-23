@@ -92,9 +92,9 @@ def _rewrite_configmap_files(output_dir, alias_map):
                     f.write(rewritten)
 
 
-def _rewrite_caddy(caddy_entries, alias_map):
-    """Rewrite FQDN upstreams and server_sni in Caddy entries."""
-    for entry in caddy_entries:
+def _rewrite_ingress_entries(ingress_entries, alias_map):
+    """Rewrite FQDN upstreams and server_sni in ingress entries."""
+    for entry in ingress_entries:
         upstream = entry.get("upstream", "")
         # FQDN flattening first
         rewritten = _rewrite_k8s_dns(upstream)
@@ -121,9 +121,9 @@ class FlattenInternalUrls:
     name = "flatten-internal-urls"
     priority = 2000  # run after other transforms
 
-    def transform(self, compose_services, caddy_entries, ctx):
+    def transform(self, compose_services, ingress_entries, ctx):
         """Flatten all K8s FQDNs to short compose service names."""
         _strip_aliases(compose_services)
         _rewrite_env(compose_services, ctx.alias_map)
         _rewrite_configmap_files(ctx.output_dir, ctx.alias_map)
-        _rewrite_caddy(caddy_entries, ctx.alias_map)
+        _rewrite_ingress_entries(ingress_entries, ctx.alias_map)
