@@ -54,6 +54,19 @@ Verify it loaded: `Loaded transforms: FlattenInternalUrls` appears on stderr.
 
 200 (runs after other transforms).
 
+## Code quality
+
+*Last updated: 2026-02-23*
+
+| Metric | Value |
+|--------|-------|
+| Pylint | 10.00/10 |
+| Pyflakes | clean |
+| Radon MI | 63.89 (A) |
+| Radon avg CC | 3.7 (A) |
+
+No C-rated functions.
+
 ## License
 
 Public domain.

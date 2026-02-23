@@ -115,7 +115,7 @@ def _rewrite_ingress_entries(ingress_entries, alias_map):
                 entry["server_sni"] = rewritten
 
 
-class FlattenInternalUrls:
+class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract: one class, one method
     """Strip network aliases and rewrite FQDNs to short Docker names."""
 
     name = "flatten-internal-urls"
