@@ -28,7 +28,7 @@ Beyond nerdctl, flattening also produces cleaner compose output — no alias blo
 python3 dekube-manager.py flatten-internal-urls
 ```
 
-Or add to `helmfile2compose.yaml`:
+Or add to `dekube.yaml`:
 
 ```yaml
 depends:
