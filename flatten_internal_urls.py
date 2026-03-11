@@ -1,4 +1,4 @@
-"""flatten-internal-urls — h2c transform.
+"""flatten-internal-urls — dekube transform.
 
 Strips Docker Compose network aliases and rewrites K8s FQDNs to short
 compose service names. Restores nerdctl compatibility (nerdctl silently
