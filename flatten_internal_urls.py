@@ -84,8 +84,13 @@ def _rewrite_configmap_files(output_dir, alias_map):
     for root, _dirs, files in os.walk(cm_dir):
         for fname in files:
             fpath = os.path.join(root, fname)
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
+            if os.path.islink(fpath):
+                continue
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                continue  # skip binary files
             rewritten = _rewrite_text(content, alias_map)
             if rewritten != content:
                 with open(fpath, "w", encoding="utf-8") as f:
