@@ -55,7 +55,7 @@ Verify it loaded: `Loaded transforms: FlattenInternalUrls` appears on stderr.
 
 ## Priority
 
-200 (runs after other transforms).
+2000 (runs after other transforms).
 
 ## Code quality
 
