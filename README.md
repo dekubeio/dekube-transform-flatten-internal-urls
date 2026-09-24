@@ -61,16 +61,18 @@ Verify it loaded: `Loaded transforms: FlattenInternalUrls` appears on stderr.
 
 ## Code quality
 
-*Last updated: 2026-02-23*
+*Last updated: 2026-09-24*
 
 | Metric | Value |
 |--------|-------|
-| Pylint | 10.00/10 |
+| Pylint | 9.35/10 |
 | Pyflakes | clean |
-| Radon MI | 63.89 (A) |
-| Radon avg CC | 3.7 (A) |
+| Radon MI | 55.10 (A) |
+| Radon avg CC | 4.8 (A) |
 
-No C-rated functions.
+Worst CC: `_strip_aliases` (11, C). No function rated D or worse.
+
+Most of the pylint gap is `E0401: Unable to import 'dekube'`, which this file doesn't suppress inline — extensions import from dekube-engine at runtime, not at lint time.
 
 ## License
 
