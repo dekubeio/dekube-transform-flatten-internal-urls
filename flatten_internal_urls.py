@@ -106,10 +106,10 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
     def _rewrite_scheme_or_at_host(text, alias_map):
         """Rewrite ``alias`` only when it's an actual URL host: right after ``scheme://`` or ``@``.
 
-        Narrower than the engine's `apply_alias_map`, which treats any `/`-preceded
-        token as a URL host — fine for env vars/ConfigMap text, but wrong for argv,
-        where a bare `/` almost always means a filesystem path
-        (``/usr/local/bin/<alias>``), not a URL.
+        Engines ≤ v1.7.0 had `apply_alias_map` treat any `/`-preceded token as a URL
+        host, which is wrong for argv, where a bare `/` almost always means a
+        filesystem path (``/usr/local/bin/<alias>``); this stays self-contained so
+        argv is safe on those engines too.
         """
         for alias, target in (alias_map or {}).items():
             if alias not in text:
