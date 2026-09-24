@@ -16,11 +16,14 @@ Beyond nerdctl, flattening also produces cleaner compose output — no alias blo
 
 ## What it does
 
-1. **Strips `networks.default.aliases`** from all compose services
+1. **Strips `networks.default.aliases`** from all compose services — unless a short alias was found in content we couldn't safely rewrite (see below), in which case it's kept instead of removed
 2. **Rewrites FQDN references** in environment variables (`svc.ns.svc.cluster.local` → `svc`)
-3. **Rewrites FQDN references** in ConfigMap files on disk
-4. **Rewrites FQDN upstreams** in Caddy entries
-5. **Resolves K8s Service aliases** to compose service names (e.g. `keycloak-service` → `keycloak`)
+3. **Rewrites FQDN references** in `command`/`entrypoint` list items
+4. **Rewrites FQDN references** in ConfigMap files on disk
+5. **Rewrites FQDN upstreams** in Caddy entries
+6. **Resolves K8s Service aliases** to compose service names (e.g. `keycloak-service` → `keycloak`), including bare `host` / `host:port` references with no scheme (word-boundary safe — `docs-media-bucket` never matches alias `docs-media`)
+
+Binary ConfigMap files (base64 `binaryData`) are never text-rewritten — a different-length replacement would corrupt the format. If one contains an alias's raw bytes, that alias's short network name is kept rather than stripped, since we can't confirm we rewrote every reference inside it.
 
 ## Install
 
