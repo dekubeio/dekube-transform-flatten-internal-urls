@@ -16,6 +16,11 @@ from dekube import apply_alias_map, rewrite_k8s_dns
 # care as the engine's own DNS/alias regexes (apply_alias_map, _K8S_DNS_RE).
 _HOST_CHAR = r'[A-Za-z0-9_.-]'
 
+# Left-boundary exclusion for `_alias_port_pattern`: also rejects `/` (image path,
+# e.g. `docker.io/library/redis:7` — a real URL host after `://` is already caught
+# by the scheme pass) and `:` (IPv6 hex group, e.g. `fd00::db:5432`).
+_LEFT_BOUNDARY_EXCLUDE = r'[A-Za-z0-9_./:-]'
+
 
 class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract: one class, one method
     """Strip network aliases and rewrite FQDNs to short Docker names."""
@@ -31,8 +36,20 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
         regex backtrack to an empty port and match a scheme name (``redis://...``) or
         a YAML/JSON key (``redis:\\n``) as if it were a bare host. Requiring digits
         means the only way to match is a real ``host:port`` shape.
+
+        The left boundary additionally excludes ``/`` and ``:`` (an image path like
+        ``docker.io/library/redis:7``, or an IPv6 hex group like ``fd00::db:5432``)
+        — neither is a bare host, and a real URL host is already caught by the
+        scheme/``@`` pass before this one runs.
+
+        # CBA: a bare `alias:<digits>` with nothing at all before it (start of
+        # string, `=`, `,`, whitespace...) is still indistinguishable from an image
+        # tag (`postgres:16`) or a `KEY=value` port-shaped number (`IMAGE=redis:7`).
+        # Upgrade path: restrict the rewrite to fields known to hold a hostname
+        # (an env var name allow/deny-list, or skip values that look like an image
+        # reference) instead of scanning arbitrary text.
         """
-        return re.compile(rf'(?<!{_HOST_CHAR}){re.escape(alias)}:(?P<port>\d+)(?!{_HOST_CHAR})')
+        return re.compile(rf'(?<!{_LEFT_BOUNDARY_EXCLUDE}){re.escape(alias)}:(?P<port>\d+)(?!{_HOST_CHAR})')
 
     @staticmethod
     def _rewrite_alias_port(text, alias_map):
