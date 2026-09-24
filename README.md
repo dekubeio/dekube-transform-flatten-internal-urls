@@ -18,12 +18,12 @@ Beyond nerdctl, flattening also produces cleaner compose output — no alias blo
 
 1. **Strips `networks.default.aliases`** from all compose services — unless a short alias was found in content we couldn't safely rewrite (see below), in which case it's kept instead of removed
 2. **Rewrites FQDN references** in environment variables (`svc.ns.svc.cluster.local` → `svc`)
-3. **Rewrites FQDN references** in `command`/`entrypoint` list items
+3. **Rewrites FQDN references** in `command`/`entrypoint` list items — narrower than env/ConfigMap text: only an actual `scheme://host` or `@host` URL position, or a bare `host:<port>` with a real numeric port. A path segment (`/usr/local/bin/api`) or a bare word with no port (`nc -z redis 6379`) is never touched, since argv has no reliable way to tell a hostname from a path or a positional argument.
 4. **Rewrites FQDN references** in ConfigMap files on disk
 5. **Rewrites FQDN upstreams** in Caddy entries
-6. **Resolves K8s Service aliases** to compose service names (e.g. `keycloak-service` → `keycloak`), including bare `host` / `host:port` references with no scheme (word-boundary safe — `docs-media-bucket` never matches alias `docs-media`)
+6. **Resolves K8s Service aliases** to compose service names (e.g. `keycloak-service` → `keycloak`), including bare `host:<port>` references with a real numeric port and no scheme (word-boundary safe — `docs-media-bucket` never matches alias `docs-media`, and `redis://...` is never mistaken for a `redis:<port>` host since the port is mandatory, not optional)
 
-Binary ConfigMap files (base64 `binaryData`) are never text-rewritten — a different-length replacement would corrupt the format. If one contains an alias's raw bytes, that alias's short network name is kept rather than stripped, since we can't confirm we rewrote every reference inside it.
+A **bare word with no port** (`CACHE_DRIVER=redis`, a YAML key `redis:`, a scheme name `redis://`, a lone argv token) is **never rewritten** — there's no reliable way to tell a real hostname reference from a config key, a URL scheme, or an unrelated word once there's no port attached. Its alias is kept instead of stripped, so DNS resolution for it still works. Binary ConfigMap files (base64 `binaryData`) get the same treatment for the same reason — a different-length text replacement would corrupt the format, so an alias found in raw bytes there is kept too rather than guessed at.
 
 ## Install
 

@@ -12,8 +12,8 @@ import re
 
 from dekube import apply_alias_map, rewrite_k8s_dns
 
-# Chars that make a bare-host match ambiguous when glued to either side —
-# same care as the engine's own DNS/alias regexes (apply_alias_map, _K8S_DNS_RE).
+# Chars that make a token boundary ambiguous when glued to either side — same
+# care as the engine's own DNS/alias regexes (apply_alias_map, _K8S_DNS_RE).
 _HOST_CHAR = r'[A-Za-z0-9_.-]'
 
 
@@ -24,41 +24,107 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
     priority = 2000  # run after other transforms
 
     @staticmethod
-    def _bare_host_pattern(alias):
-        """Boundary-safe regex for a bare ``alias`` or ``alias:port`` token.
+    def _alias_port_pattern(alias):
+        """Regex for a bare ``alias:<digits>`` token — a numeric port is mandatory.
 
-        apply_alias_map only rewrites aliases preceded by ``/`` or ``@`` (URL/URI
-        hostname positions) — a bare host with no scheme is never touched. This
-        covers that gap, with word boundaries so e.g. "docs-media-bucket" never
-        matches alias "docs-media".
+        The port is NOT optional: an earlier version made it optional, which let the
+        regex backtrack to an empty port and match a scheme name (``redis://...``) or
+        a YAML/JSON key (``redis:\\n``) as if it were a bare host. Requiring digits
+        means the only way to match is a real ``host:port`` shape.
         """
-        return re.compile(rf'(?<!{_HOST_CHAR}){re.escape(alias)}(?P<port>:\d+)?(?!{_HOST_CHAR})')
+        return re.compile(rf'(?<!{_HOST_CHAR}){re.escape(alias)}:(?P<port>\d+)(?!{_HOST_CHAR})')
 
     @staticmethod
-    def _rewrite_bare_hosts(text, alias_map):
-        """Rewrite bare ``alias``/``alias:port`` tokens (no scheme, no ``@``) in text."""
+    def _rewrite_alias_port(text, alias_map):
+        """Rewrite bare ``alias:<port>`` tokens (no scheme, no ``@``) to ``target:<port>``."""
         for alias, target in (alias_map or {}).items():
             if alias in text:
-                text = FlattenInternalUrls._bare_host_pattern(alias).sub(
-                    lambda m, _target=target: _target + (m.group("port") or ""), text)
+                text = FlattenInternalUrls._alias_port_pattern(alias).sub(
+                    lambda m, _target=target: f"{_target}:{m.group('port')}", text)
         return text
 
     @staticmethod
-    def _rewrite_text(text, alias_map):
-        """Apply FQDN flattening + alias map resolution (scheme-based and bare) to a string."""
+    def _bare_word_pattern(alias):
+        """Boundary-safe regex for ``alias`` with nothing attached on either side.
+
+        Callers run this only after ``_rewrite_alias_port`` has already consumed
+        every ``alias:<port>`` occurrence, so any match left is a genuine bare word
+        with no port — e.g. ``CACHE_DRIVER=redis`` or a lone ``nc host`` argv item.
+        """
+        return re.compile(rf'(?<!{_HOST_CHAR}){re.escape(alias)}(?!{_HOST_CHAR})')
+
+    @staticmethod
+    def _mark_unsafe_bare_words(text, alias_map, unsafe_aliases):
+        """Flag aliases that appear as a bare word (no port) — never rewritten.
+
+        Rewriting a bare word is exactly what corrupted URL schemes and YAML/JSON
+        keys before (see ``_alias_port_pattern``'s docstring): there is no way to
+        tell "this word is a hostname" from "this word is a scheme/config key" once
+        the port is gone. So we never touch it — we only keep the short network
+        alias standing in for it (the brief's fallback clause), same mechanism
+        already used for binary ConfigMap content.
+        """
+        for alias in (alias_map or {}):
+            if FlattenInternalUrls._bare_word_pattern(alias).search(text):
+                unsafe_aliases.add(alias)
+
+    @staticmethod
+    def _rewrite_text(text, alias_map, unsafe_aliases):
+        """Apply FQDN flattening + alias resolution to free text (env vars, ConfigMap files).
+
+        Order matters: `rewrite_k8s_dns` collapses FQDNs to bare service names first,
+        then `apply_alias_map` (engine helper) handles the existing scheme-/`@`-anchored
+        case (also catches path segments — accepted here, pre-existing, unflagged),
+        then the new `alias:<port>` case, then whatever's still a bare word is left
+        untouched and its alias flagged unsafe-to-strip.
+        """
         text = rewrite_k8s_dns(text)
         if alias_map:
             text = apply_alias_map(text, alias_map)
-            text = FlattenInternalUrls._rewrite_bare_hosts(text, alias_map)
+            text = FlattenInternalUrls._rewrite_alias_port(text, alias_map)
+            FlattenInternalUrls._mark_unsafe_bare_words(text, alias_map, unsafe_aliases)
+        return text
+
+    @staticmethod
+    def _rewrite_scheme_or_at_host(text, alias_map):
+        """Rewrite ``alias`` only when it's an actual URL host: right after ``scheme://`` or ``@``.
+
+        Narrower than the engine's `apply_alias_map`, which treats any `/`-preceded
+        token as a URL host — fine for env vars/ConfigMap text, but wrong for argv,
+        where a bare `/` almost always means a filesystem path
+        (``/usr/local/bin/<alias>``), not a URL.
+        """
+        for alias, target in (alias_map or {}).items():
+            if alias not in text:
+                continue
+            pattern = re.compile(r'(?:(?<=://)|(?<=@))' + re.escape(alias) + r'''(?=[/:\s"']|$)''')
+            text = pattern.sub(target, text)
+        return text
+
+    @staticmethod
+    def _rewrite_argv_text(text, alias_map, unsafe_aliases):
+        """Apply FQDN flattening + alias resolution to one ``command``/``entrypoint`` item.
+
+        Deliberately narrower than `_rewrite_text`: no generic `apply_alias_map` here
+        (see `_rewrite_scheme_or_at_host`), just scheme/`@` hosts and `alias:<port>`.
+        Anything else stays untouched and its alias is flagged unsafe-to-strip —
+        e.g. `/usr/local/bin/api` or a bare `nc host port` argv item.
+        """
+        text = rewrite_k8s_dns(text)
+        if alias_map:
+            text = FlattenInternalUrls._rewrite_scheme_or_at_host(text, alias_map)
+            text = FlattenInternalUrls._rewrite_alias_port(text, alias_map)
+            FlattenInternalUrls._mark_unsafe_bare_words(text, alias_map, unsafe_aliases)
         return text
 
     @staticmethod
     def _strip_aliases(compose_services, unsafe_aliases):
         """Remove network aliases from all compose services.
 
-        A short alias flagged in ``unsafe_aliases`` (a bare-host reference found in
-        content we couldn't safely rewrite, e.g. binary configmap data) is kept
-        instead of stripped — a redundant alias beats a silently broken hostname.
+        A short alias flagged in ``unsafe_aliases`` (a bare-word reference found
+        anywhere we couldn't safely rewrite — free text, argv, or binary ConfigMap
+        data) is kept instead of stripped — a redundant alias beats a silently
+        broken hostname.
         """
         for svc in compose_services.values():
             networks = svc.get("networks")
@@ -76,7 +142,7 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
                     del svc["networks"]
 
     @staticmethod
-    def _rewrite_env(compose_services, alias_map):
+    def _rewrite_env(compose_services, alias_map, unsafe_aliases):
         """Rewrite FQDN/alias references in environment variables."""
         for svc in compose_services.values():
             env = svc.get("environment")
@@ -85,12 +151,12 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
             for key in list(env):
                 val = env[key]
                 if isinstance(val, str):
-                    rewritten = FlattenInternalUrls._rewrite_text(val, alias_map)
+                    rewritten = FlattenInternalUrls._rewrite_text(val, alias_map, unsafe_aliases)
                     if rewritten != val:
                         env[key] = rewritten
 
     @staticmethod
-    def _rewrite_command_args(compose_services, alias_map):
+    def _rewrite_command_args(compose_services, alias_map, unsafe_aliases):
         """Rewrite FQDN/alias references inside ``command``/``entrypoint`` list items."""
         for svc in compose_services.values():
             for key in ("command", "entrypoint"):
@@ -99,7 +165,7 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
                     continue
                 for i, item in enumerate(items):
                     if isinstance(item, str):
-                        rewritten = FlattenInternalUrls._rewrite_text(item, alias_map)
+                        rewritten = FlattenInternalUrls._rewrite_argv_text(item, alias_map, unsafe_aliases)
                         if rewritten != item:
                             items[i] = rewritten
 
@@ -128,7 +194,7 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
                         if alias.encode("utf-8") in raw:
                             unsafe_aliases.add(alias)
                     continue  # skip binary files
-                rewritten = FlattenInternalUrls._rewrite_text(content, alias_map)
+                rewritten = FlattenInternalUrls._rewrite_text(content, alias_map, unsafe_aliases)
                 if rewritten != content:
                     with open(fpath, "w", encoding="utf-8") as f:
                         f.write(rewritten)
@@ -159,8 +225,8 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
     def transform(self, compose_services, ingress_entries, ctx):
         """Flatten all K8s FQDNs to short compose service names."""
         unsafe_aliases = set()
-        self._rewrite_env(compose_services, ctx.alias_map)
-        self._rewrite_command_args(compose_services, ctx.alias_map)
+        self._rewrite_env(compose_services, ctx.alias_map, unsafe_aliases)
+        self._rewrite_command_args(compose_services, ctx.alias_map, unsafe_aliases)
         self._rewrite_configmap_files(ctx.output_dir, ctx.alias_map, unsafe_aliases)
         self._rewrite_ingress_entries(ingress_entries, ctx.alias_map)
         self._strip_aliases(compose_services, unsafe_aliases)
