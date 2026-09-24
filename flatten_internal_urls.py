@@ -90,8 +90,8 @@ class FlattenInternalUrls:  # pylint: disable=too-few-public-methods  # contract
         """Apply FQDN flattening + alias resolution to free text (env vars, ConfigMap files).
 
         Order matters: `rewrite_k8s_dns` collapses FQDNs to bare service names first,
-        then `apply_alias_map` (engine helper) handles the existing scheme-/`@`-anchored
-        case (also catches path segments — accepted here, pre-existing, unflagged),
+        then `apply_alias_map` (engine helper) handles the `//`-/`@`-anchored case
+        (engine ≥ v1.8.0 leaves path segments alone; older engines rewrote them too),
         then the new `alias:<port>` case, then whatever's still a bare word is left
         untouched and its alias flagged unsafe-to-strip.
         """
